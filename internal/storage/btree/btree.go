@@ -2,11 +2,10 @@ package btree
 
 import (
 	"encoding/binary"
-	
-)
+	)
 
 type BNode struct{
-	data[] byte         //can be dumped to the disk,storing in disk format 
+	data []byte         //can be dumped to the disk,storing in disk format 
 }
 
 const(
@@ -115,4 +114,128 @@ return node.data[pos+4+klen:][:vlen]
 
 func (node BNode)nbytes()uint16 {
 return node.kvPos(node.nkeys())
+}
+
+
+func (tree *BTree) Insert(
+	key []byte,
+	val []byte,
+) {
+	assert(len(key) != 0)
+	assert(len(key) <= BTREE_MAX_KEY_SIZE)
+	assert(len(val) <= BTREE_MAX_VAL_SIZE)
+
+	// Empty tree.
+	if tree.root == 0 {
+
+		root := BNode{
+			data: make([]byte, BTREE_PAGE_SIZE),
+		}
+
+		root.setHeader(
+			BNODE_LEAF,
+			2,
+		)
+
+		// Dummy key.
+		nodeAppendKV(
+			root,
+			0,
+			0,
+			nil,
+			nil,
+		)
+
+		// First real key.
+		nodeAppendKV(
+			root,
+			1,
+			0,
+			key,
+			val,
+		)
+
+		tree.root = tree.new(root)
+		return
+	}
+
+	node := tree.get(tree.root)
+
+	tree.del(tree.root)
+
+	node = treeInsert(
+		tree,
+		node,
+		key,
+		val,
+	)
+
+	nsplit, splitted := nodeSplit3(node)
+
+	if nsplit > 1 {
+
+		// Create a new root.
+		root := BNode{
+			data: make([]byte, BTREE_PAGE_SIZE),
+		}
+
+		root.setHeader(
+			BNODE_NODE,
+			nsplit,
+		)
+
+		for i, knode := range splitted[:nsplit] {
+
+			ptr := tree.new(knode)
+			key := knode.getKey(0)
+
+			nodeAppendKV(
+				root,
+				uint16(i),
+				ptr,
+				key,
+				nil,
+			)
+		}
+
+		tree.root = tree.new(root)
+
+	} else {
+
+		tree.root = tree.new(splitted[0])
+	}
+}
+
+
+func (tree *BTree) Delete(key []byte) bool {
+	assert(len(key) != 0)
+	assert(len(key) <= BTREE_MAX_KEY_SIZE)
+
+	if tree.root == 0 {
+		return false
+	}
+
+	updated := treeDelete(
+		tree,
+		tree.get(tree.root),
+		key,
+	)
+
+	if len(updated.data) == 0 {
+		return false // key not found
+	}
+
+	tree.del(tree.root)
+
+	// Remove one level if the root has only one child.
+	if updated.btype() == BNODE_NODE &&
+		updated.nkeys() == 1 {
+
+		tree.root = updated.getPtr(0)
+
+	} else {
+		tree.root = tree.new(updated)
+	}
+
+	return true
 }
