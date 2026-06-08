@@ -291,3 +291,36 @@ func TestRandomOps(t *testing.T) {
 
 	c.verify(t)
 }
+
+func TestGet(t *testing.T) {
+	c := newC()
+
+	c.add("foo", "bar")
+	c.add("hello", "world")
+
+	// Found cases.
+	for _, tc := range []struct{ key, want string }{
+		{"foo", "bar"},
+		{"hello", "world"},
+	} {
+		got := c.tree.Get([]byte(tc.key))
+		if string(got) != tc.want {
+			t.Errorf("Get(%q) = %q, want %q", tc.key, got, tc.want)
+		}
+	}
+
+	// Missing key must return nil.
+	if c.tree.Get([]byte("missing")) != nil {
+		t.Error("Get: expected nil for missing key")
+	}
+
+	// Empty tree must return nil.
+	empty := &BTree{
+		get: c.tree.get,
+		new: c.tree.new,
+		del: c.tree.del,
+	}
+	if empty.Get([]byte("anything")) != nil {
+		t.Error("Get on empty tree should return nil")
+	}
+}

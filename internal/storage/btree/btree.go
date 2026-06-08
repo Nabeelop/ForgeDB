@@ -1,8 +1,9 @@
 package btree
 
 import (
+	"bytes"
 	"encoding/binary"
-	)
+)
 
 type BNode struct{
 	data []byte         //can be dumped to the disk,storing in disk format 
@@ -116,6 +117,33 @@ func (node BNode)nbytes()uint16 {
 return node.kvPos(node.nkeys())
 }
 
+
+// Get returns the value for a key, or nil if the key does not exist.
+func (tree *BTree) Get(key []byte) []byte {
+	if tree.root == 0 {
+		return nil
+	}
+
+	node := tree.get(tree.root)
+
+	for {
+		idx := nodeLookupLE(node, key)
+
+		switch node.btype() {
+		case BNODE_LEAF:
+			if idx < node.nkeys() && bytes.Equal(node.getKey(idx), key) {
+				return node.getVal(idx)
+			}
+			return nil // key not found
+
+		case BNODE_NODE:
+			node = tree.get(node.getPtr(idx))
+
+		default:
+			panic("bad node type")
+		}
+	}
+}
 
 func (tree *BTree) Insert(
 	key []byte,
