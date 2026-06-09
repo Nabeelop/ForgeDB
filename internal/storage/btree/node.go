@@ -28,6 +28,17 @@ func assert(cond bool) {
 	}
 }
 
+// NewBNode wraps a raw page byte slice into a BNode.
+// Used by the storage layer to convert mmap'd memory into a BNode.
+func NewBNode(data []byte) BNode {
+	return BNode{data: data}
+}
+
+// Data returns the underlying raw byte slice of the BNode.
+func (node BNode) Data() []byte {
+	return node.data
+}
+
 func init() {
 	node1max := HEADER + 8 + 2 + 4 + BTREE_MAX_KEY_SIZE + BTREE_MAX_VAL_SIZE
 	assert(node1max <= BTREE_PAGE_SIZE)

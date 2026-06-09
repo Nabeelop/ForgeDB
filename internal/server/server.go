@@ -9,14 +9,14 @@ import (
 	"forgedb/internal/storage"
 )
 
-// Server coordinates the TCP server interface.
+// Server wraps a TCP listener and a KV database handle.
 type Server struct {
-	db       *storage.DB
+	db       *storage.KV
 	listener net.Listener
 }
 
-// NewServer configures a new Server instance listening on a specified address.
-func NewServer(addr string, db *storage.DB) (*Server, error) {
+// NewServer creates a TCP server bound to addr, backed by the given KV store.
+func NewServer(addr string, db *storage.KV) (*Server, error) {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to bind to address %s: %w", addr, err)
@@ -27,7 +27,7 @@ func NewServer(addr string, db *storage.DB) (*Server, error) {
 	}, nil
 }
 
-// Start starts listening and block-accepting network client connections.
+// Start accepts connections in a loop. Blocks until the listener is closed.
 func (s *Server) Start() error {
 	for {
 		conn, err := s.listener.Accept()
@@ -38,7 +38,7 @@ func (s *Server) Start() error {
 	}
 }
 
-// Close shuts down the network listener.
+// Close shuts down the TCP listener.
 func (s *Server) Close() error {
 	return s.listener.Close()
 }
@@ -48,7 +48,6 @@ func (s *Server) handleConnection(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
 
-	// Send initial greeting on connection
 	_, _ = writer.WriteString("Welcome to ForgeDB Server!\n")
 	_ = writer.Flush()
 
@@ -66,40 +65,57 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 		cmd := strings.ToUpper(parts[0])
 		switch cmd {
+
 		case "GET":
 			if len(parts) < 2 {
 				_, _ = writer.WriteString("ERR: GET requires a key\n")
 				_ = writer.Flush()
 				continue
 			}
-			key := []byte(parts[1])
-			val, err := s.db.Get(key)
-			if err != nil {
-				_, _ = writer.WriteString(fmt.Sprintf("ERR: %s\n", err.Error()))
+			val, ok := s.db.Get([]byte(parts[1]))
+			if !ok {
+				_, _ = writer.WriteString("ERR: key not found\n")
 			} else {
-				_, _ = writer.WriteString(fmt.Sprintf("VALUE: %s\n", string(val)))
+				_, _ = writer.WriteString(fmt.Sprintf("VALUE: %s\n", val))
 			}
-		case "PUT":
+
+		case "PUT", "SET":
 			if len(parts) < 3 {
-				_, _ = writer.WriteString("ERR: PUT requires key and value arguments\n")
+				_, _ = writer.WriteString("ERR: PUT/SET requires a key and a value\n")
 				_ = writer.Flush()
 				continue
 			}
-			key := []byte(parts[1])
-			val := []byte(parts[2])
-			err := s.db.Put(key, val)
+			err := s.db.Set([]byte(parts[1]), []byte(parts[2]))
 			if err != nil {
-				_, _ = writer.WriteString(fmt.Sprintf("ERR: %s\n", err.Error()))
+				_, _ = writer.WriteString(fmt.Sprintf("ERR: %s\n", err))
 			} else {
 				_, _ = writer.WriteString("OK\n")
 			}
+
+		case "DELETE", "DEL":
+			if len(parts) < 2 {
+				_, _ = writer.WriteString("ERR: DEL requires a key\n")
+				_ = writer.Flush()
+				continue
+			}
+			ok, err := s.db.Del([]byte(parts[1]))
+			if err != nil {
+				_, _ = writer.WriteString(fmt.Sprintf("ERR: %s\n", err))
+			} else if ok {
+				_, _ = writer.WriteString("OK\n")
+			} else {
+				_, _ = writer.WriteString("ERR: key not found\n")
+			}
+
 		case "EXIT", "QUIT":
 			_, _ = writer.WriteString("Goodbye!\n")
 			_ = writer.Flush()
 			return
+
 		default:
-			_, _ = writer.WriteString(fmt.Sprintf("ERR: Unknown command '%s'\n", cmd))
+			_, _ = writer.WriteString(fmt.Sprintf("ERR: unknown command '%s'\n", cmd))
 		}
+
 		_ = writer.Flush()
 	}
 }

@@ -12,6 +12,27 @@ type BTree struct {
 	del func(uint64)        // deallocate a page
 }
 
+// GetRoot returns the root page ID of the B-Tree.
+func (tree *BTree) GetRoot() uint64 {
+	return tree.root
+}
+
+// SetRoot sets the root page ID of the B-Tree.
+func (tree *BTree) SetRoot(root uint64) {
+	tree.root = root
+}
+
+// SetCallbacks configures the page management callbacks for the B-Tree.
+func (tree *BTree) SetCallbacks(
+	get func(uint64) BNode,
+	new func(BNode) uint64,
+	del func(uint64),
+) {
+	tree.get = get
+	tree.new = new
+	tree.del = del
+}
+
 // Get returns the value for key, or nil if the key does not exist.
 func (tree *BTree) Get(key []byte) []byte {
 	if tree.root == 0 {
