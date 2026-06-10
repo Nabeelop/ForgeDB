@@ -20,6 +20,7 @@ type KV struct {
 	// internals
 	fp   *os.File
 	tree btree.BTree
+	free FreeList
 
 	mmap struct {
 		file   int      // file size in bytes (may be larger than db size)
@@ -28,8 +29,14 @@ type KV struct {
 	}
 
 	page struct {
-		flushed uint64   // number of pages flushed to disk
-		temp    [][]byte // new pages buffered until the next flush
+		flushed uint64 // database size in number of pages
+
+		nfree   int // number of pages taken from the free list
+		nappend int // number of pages to be appended
+
+		// Newly allocated or deallocated pages keyed by page number.
+		// A nil value denotes a deallocated page.
+		updates map[uint64][]byte
 	}
 }
 
@@ -45,42 +52,55 @@ func (db *KV) Get(key []byte) ([]byte, bool) {
 }
 
 // Put inserts or updates a key-value pair.
-func (db *KV)Set(key []byte, val[]byte)error{
-db.tree.Insert(key,val)
-return flushPages(db)
+func (db *KV) Set(key []byte, val []byte) error {
+	db.tree.Insert(key, val)
+	return flushPages(db)
 }
 
 // Delete removes a key. Returns false if the key was not found.
-func (db *KV)Del(key []byte)(bool,error){
-deleted :=db.tree.Delete(key)
-return deleted,flushPages(db)
+func (db *KV) Del(key []byte) (bool, error) {
+	deleted := db.tree.Delete(key)
+	return deleted, flushPages(db)
 }
 
-//persistthe newly allocatedpages after updates
-func flushPages(db *KV)error {
-if err :=writePages(db); err!=nil {
-return err
-}
-return syncPages(db)
+// persist the newly allocated pages after updates
+func flushPages(db *KV) error {
+	if err := writePages(db); err != nil {
+		return err
+	}
+	return syncPages(db)
 }
 
-func writePages(db *KV)error {
-//extendthe file &mmap ifneeded
-npages :=int(db.page.flushed)+ len(db.page.temp)
-if err :=extendFile(db, npages);err !=nil {
-return err
-}
+func writePages(db *KV) error {
+	// update the free list
+	freed := []uint64{}
+
+	for ptr, page := range db.page.updates {
+		if page == nil {
+			freed = append(freed, ptr)
+		}
+	}
+
+	db.free.Update(db.page.nfree, freed)
+
+	// extend the file & mmap if needed
+	npages := int(db.page.flushed) + db.page.nappend
+	if err := extendFile(db, npages); err != nil {
+		return err
+	}
 	if err := extendMmap(db, npages); err != nil {
 		return err
 	}
-	//copy data tothe file
-	for i, page := range db.page.temp {
-		ptr := db.page.flushed + uint64(i)
-		copy(db.pageGet(ptr).Data(), page)
+
+	// copy pages to the file
+	for ptr, page := range db.page.updates {
+		if page != nil {
+			copy(pageGetMapped(db, ptr).Data(), page)
+		}
 	}
+
 	return nil
 }
-
 
 // Flush pages to disk and commit the update.
 func syncPages(db *KV) error {
@@ -92,10 +112,12 @@ func syncPages(db *KV) error {
 	}
 
 	// These pages are now durable.
-	db.page.flushed += uint64(len(db.page.temp))
+	db.page.flushed += uint64(db.page.nappend)
 
 	// Clear temporary page buffer.
-	db.page.temp = db.page.temp[:0]
+	db.page.nappend = 0
+	db.page.nfree = 0
+	db.page.updates = make(map[uint64][]byte)
 
 	// Update the master page
 	// (root pointer + number of used pages).
@@ -137,6 +159,15 @@ func (db *KV) Open() error {
 
 	// BTree callbacks.
 	db.tree.SetCallbacks(db.pageGet, db.pageNew, db.pageDel)
+
+	//Freelist Callbacks
+	db.free = FreeList{
+		get: db.pageGet,
+		new: db.pageAppend,
+		use: db.pageUse,
+	}
+
+	db.page.updates = make(map[uint64][]byte)
 
 	// Load the master page.
 	err = masterLoad(db)

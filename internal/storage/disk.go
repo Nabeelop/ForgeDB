@@ -71,7 +71,6 @@ func extendMmap(db *KV, npages int) error {
 	return nil
 }
 
-
 // Extend the file to at least npages pages.
 func extendFile(db *KV, npages int) error {
 
@@ -114,7 +113,6 @@ func extendFile(db *KV, npages int) error {
 
 	return nil
 }
-
 
 func closeMmap(db *KV) {
 	for _, chunk := range db.mmap.chunks {

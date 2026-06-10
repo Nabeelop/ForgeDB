@@ -25,6 +25,7 @@ func masterLoad(db *KV) error {
 
 	root := binary.LittleEndian.Uint64(data[16:24])
 	used := binary.LittleEndian.Uint64(data[24:32])
+	freeHead := binary.LittleEndian.Uint64(data[32:40])
 
 	// Verify signature.
 	if !bytes.Equal([]byte(DB_SIG), data[:16]) {
@@ -40,16 +41,18 @@ func masterLoad(db *KV) error {
 
 	db.tree.SetRoot(root)
 	db.page.flushed = used
+	db.free.head = freeHead
 
 	return nil
 }
 
 // update the master page. it must be atomic.
 func masterStore(db *KV) error {
-	var data [32]byte
+	var data [40]byte
 	copy(data[:16], []byte(DB_SIG))
 	binary.LittleEndian.PutUint64(data[16:], db.tree.GetRoot())
 	binary.LittleEndian.PutUint64(data[24:], db.page.flushed)
+	binary.LittleEndian.PutUint64(data[32:], db.free.head)
 
 	// NOTE: Updating the page via mmap is not atomic.
 	// Use the `pwrite()` syscall instead.

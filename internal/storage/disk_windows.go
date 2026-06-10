@@ -61,7 +61,7 @@ func mmapInit(fp *os.File) (int, []byte, error) {
 	addr, err := syscall.MapViewOfFile(
 		handle,
 		fileMapWrite,
-		0, 0,           // offset = 0
+		0, 0, // offset = 0
 		uintptr(mmapSize),
 	)
 	_ = syscall.CloseHandle(handle)
@@ -154,9 +154,15 @@ func extendFile(db *KV, npages int) error {
 
 	fileSize := filePages * btree.BTREE_PAGE_SIZE
 
-	err := db.fp.Truncate(int64(fileSize))
+	fi, err := db.fp.Stat()
 	if err != nil {
-		return fmt.Errorf("truncate: %w", err)
+		return fmt.Errorf("stat: %w", err)
+	}
+	if fi.Size() < int64(fileSize) {
+		err := db.fp.Truncate(int64(fileSize))
+		if err != nil {
+			return fmt.Errorf("truncate: %w", err)
+		}
 	}
 
 	db.mmap.file = fileSize
