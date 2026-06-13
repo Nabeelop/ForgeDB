@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"forgedb/internal/storage"
+	"forgedb/internal/storage/btree"
 )
 
 // Server wraps a TCP listener and a KV database handle.
@@ -85,7 +86,11 @@ func (s *Server) handleConnection(conn net.Conn) {
 				_ = writer.Flush()
 				continue
 			}
-			err := s.db.Set([]byte(parts[1]), []byte(parts[2]))
+			err := s.db.Set(&btree.InsertReq{
+				Key:  []byte(parts[1]),
+				Val:  []byte(parts[2]),
+				Mode: btree.MODE_UPSERT,
+			})
 			if err != nil {
 				_, _ = writer.WriteString(fmt.Sprintf("ERR: %s\n", err))
 			} else {
@@ -98,7 +103,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 				_ = writer.Flush()
 				continue
 			}
-			ok, err := s.db.Del([]byte(parts[1]))
+			ok, err := s.db.Del(&btree.DeleteReq{
+				Key: []byte(parts[1]),
+			})
 			if err != nil {
 				_, _ = writer.WriteString(fmt.Sprintf("ERR: %s\n", err))
 			} else if ok {

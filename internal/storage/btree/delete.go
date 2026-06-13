@@ -4,11 +4,21 @@ import (
 	"bytes"
 )
 
+type DeleteReq struct {
+	tree *BTree
+
+	// Input
+	Key []byte
+
+	// Output
+	Old []byte
+}
+
 // remove a key from a leaf node
 func leafDelete(new BNode, old BNode, idx uint16) {
-new.setHeader(BNODE_LEAF, old.nkeys()-1)
-nodeAppendRange(new, old, 0, 0, idx)
-nodeAppendRange(new, old, idx, idx+1, old.nkeys()-(idx+1))
+	new.setHeader(BNODE_LEAF, old.nkeys()-1)
+	nodeAppendRange(new, old, 0, 0, idx)
+	nodeAppendRange(new, old, idx, idx+1, old.nkeys()-(idx+1))
 }
 
 // Delete a key from the tree.
@@ -55,7 +65,6 @@ func treeDelete(
 		panic("bad node!")
 	}
 }
-
 
 // Part of treeDelete().
 func nodeDelete(
@@ -154,7 +163,7 @@ func nodeDelete(
 
 	default:
 		// No merge required.
-		assert(updated.nkeys() > 0)
+		Assert(updated.nkeys() > 0)
 
 		nodeReplaceKidN(
 			tree,
@@ -168,13 +177,12 @@ func nodeDelete(
 	return new
 }
 
-//merge 2nodes into 1
-func nodeMerge(new BNode, left BNode,right BNode){
-new.setHeader(left.btype(), left.nkeys()+right.nkeys())
-nodeAppendRange(new,left,0,0, left.nkeys())
-nodeAppendRange(new,right,left.nkeys(), 0,right.nkeys())
+// merge 2nodes into 1
+func nodeMerge(new BNode, left BNode, right BNode) {
+	new.setHeader(left.btype(), left.nkeys()+right.nkeys())
+	nodeAppendRange(new, left, 0, 0, left.nkeys())
+	nodeAppendRange(new, right, left.nkeys(), 0, right.nkeys())
 }
-
 
 // Replace 2 child links with 1 child link.
 func nodeReplace2Kid(
@@ -184,7 +192,7 @@ func nodeReplace2Kid(
 	ptr uint64,
 	key []byte,
 ) {
-	assert(idx+1 < old.nkeys())
+	Assert(idx+1 < old.nkeys())
 
 	// old loses one child entry
 	new.setHeader(
@@ -214,12 +222,11 @@ func nodeReplace2Kid(
 	nodeAppendRange(
 		new,
 		old,
-		idx+1,          // dst
-		idx+2,          // src
+		idx+1, // dst
+		idx+2, // src
 		old.nkeys()-(idx+2),
 	)
 }
-
 
 // Should the updated child be merged with a sibling?
 func shouldMerge(

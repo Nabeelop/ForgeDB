@@ -3,8 +3,28 @@ package btree
 import (
 	"bytes"
 	"encoding/binary"
-	
 )
+
+// Modes of updates.
+const (
+	MODE_UPSERT      = 0 // insert or replace
+	MODE_UPDATE_ONLY = 1 // update existing keys
+	MODE_INSERT_ONLY = 2 // only add new keys
+)
+
+type InsertReq struct {
+	tree *BTree
+
+	// Output
+	Added   bool   // inserted new key
+	Updated bool   // insert OR existing key changed
+	Old     []byte // previous value before update
+
+	// Input
+	Key  []byte
+	Val  []byte
+	Mode int
+}
 
 func nodeLookupLE(node BNode, key []byte) uint16 {
 	nkeys := node.nkeys()
@@ -30,7 +50,6 @@ func nodeLookupLE(node BNode, key []byte) uint16 {
 
 	return found
 }
-
 
 // Add a new key-value pair to a leaf node.
 func leafInsert(
@@ -65,9 +84,9 @@ func leafInsert(
 	nodeAppendRange(
 		new,
 		old,
-		idx+1,             // destination position
-		idx,               // source position
-		old.nkeys()-idx,   // number of entries
+		idx+1,           // destination position
+		idx,             // source position
+		old.nkeys()-idx, // number of entries
 	)
 }
 
@@ -103,65 +122,64 @@ func leafUpdate(
 	nodeAppendRange(
 		new,
 		old,
-		idx+1,        // destination
-		idx+1,        // source
+		idx+1, // destination
+		idx+1, // source
 		old.nkeys()-idx-1,
 	)
 }
 
 func nodeAppendRange(
-    new BNode,
-    old BNode,
-    dstNew uint16,
-    srcOld uint16,
-    n uint16,
+	new BNode,
+	old BNode,
+	dstNew uint16,
+	srcOld uint16,
+	n uint16,
 ) {
-    assert(dstNew+n <= new.nkeys())
-    assert(srcOld+n <= old.nkeys())
+	Assert(dstNew+n <= new.nkeys())
+	Assert(srcOld+n <= old.nkeys())
 
-    if n == 0 {
-        return
-    }
+	if n == 0 {
+		return
+	}
 
-    // pointers
-    for i := uint16(0); i < n; i++ {
-        new.setPtr(dstNew+i, old.getPtr(srcOld+i))
-    }
+	// pointers
+	for i := uint16(0); i < n; i++ {
+		new.setPtr(dstNew+i, old.getPtr(srcOld+i))
+	}
 
-    dstBegin := new.getOffset(dstNew)
-    srcBegin := old.getOffset(srcOld)
+	dstBegin := new.getOffset(dstNew)
+	srcBegin := old.getOffset(srcOld)
 
-    // offsets
-    for i := uint16(1); i <= n; i++ {
-        offset := dstBegin +
-            old.getOffset(srcOld+i) -
-            srcBegin
+	// offsets
+	for i := uint16(1); i <= n; i++ {
+		offset := dstBegin +
+			old.getOffset(srcOld+i) -
+			srcBegin
 
-        new.setOffset(dstNew+i, offset)
-    }
+		new.setOffset(dstNew+i, offset)
+	}
 
-    // KV bytes
-    begin := old.kvPos(srcOld)
-    end := old.kvPos(srcOld + n)
+	// KV bytes
+	begin := old.kvPos(srcOld)
+	end := old.kvPos(srcOld + n)
 
-    copy(
-        new.data[new.kvPos(dstNew):],
-        old.data[begin:end],
-    )
+	copy(
+		new.data[new.kvPos(dstNew):],
+		old.data[begin:end],
+	)
 }
 
-
-func nodeAppendKV(new BNode, idx uint16,ptr uint64, key []byte,val []byte){
-//ptrs
-new.setPtr(idx,ptr)
-//KVs
-pos :=new.kvPos(idx)
-binary.LittleEndian.PutUint16(new.data[pos+0:], uint16(len(key)))
-binary.LittleEndian.PutUint16(new.data[pos+2:], uint16(len(val)))
-copy(new.data[pos+4:],key)
-copy(new.data[pos+4+uint16(len(key)):],val)
-//the offsetofthe next key
-new.setOffset(idx+1,new.getOffset(idx)+4+uint16((len(key)+len(val))))
+func nodeAppendKV(new BNode, idx uint16, ptr uint64, key []byte, val []byte) {
+	//ptrs
+	new.setPtr(idx, ptr)
+	//KVs
+	pos := new.kvPos(idx)
+	binary.LittleEndian.PutUint16(new.data[pos+0:], uint16(len(key)))
+	binary.LittleEndian.PutUint16(new.data[pos+2:], uint16(len(val)))
+	copy(new.data[pos+4:], key)
+	copy(new.data[pos+4+uint16(len(key)):], val)
+	//the offsetofthe next key
+	new.setOffset(idx+1, new.getOffset(idx)+4+uint16((len(key)+len(val))))
 }
 
 // Insert a KV into a node.
@@ -171,8 +189,7 @@ new.setOffset(idx+1,new.getOffset(idx)+4+uint16((len(key)+len(val))))
 func treeInsert(
 	tree *BTree,
 	node BNode,
-	key []byte,
-	val []byte,
+	req *InsertReq,
 ) BNode {
 
 	// Result node.
@@ -182,7 +199,7 @@ func treeInsert(
 	}
 
 	// Find the largest key <= target key.
-	idx := nodeLookupLE(node, key)
+	idx := nodeLookupLE(node, req.Key)
 
 	switch node.btype() {
 
@@ -190,24 +207,80 @@ func treeInsert(
 		// Leaf node.
 		// node.getKey(idx) <= key
 
-		if bytes.Equal(key, node.getKey(idx)) {
+		exists := bytes.Equal(
+			req.Key,
+			node.getKey(idx),
+		)
+
+		switch req.Mode {
+		case MODE_UPSERT:
 			// Key already exists: update value.
-			leafUpdate(
-				new,
-				node,
-				idx,
-				key,
-				val,
-			)
-		} else {
-			// Insert after idx.
-			leafInsert(
-				new,
-				node,
-				idx+1,
-				key,
-				val,
-			)
+			if exists {
+				req.Added = false
+				req.Updated = true
+				oldVal := node.getVal(idx)
+				req.Old = append([]byte(nil), oldVal...)
+				leafUpdate(
+					new,
+					node,
+					idx,
+					req.Key,
+					req.Val,
+				)
+			} else {
+				// Insert after idx.
+				req.Added = true
+				req.Updated = true
+				req.Old = nil
+				leafInsert(
+					new,
+					node,
+					idx+1,
+					req.Key,
+					req.Val,
+				)
+			}
+		case MODE_INSERT_ONLY:
+			// Only insert if key does not already exist.
+			if !exists {
+				req.Added = true
+				req.Updated = true
+				req.Old = nil
+				leafInsert(
+					new,
+					node,
+					idx+1,
+					req.Key,
+					req.Val,
+				)
+			} else {
+				// Key already exists, return old node unchanged.
+				copy(new.data, node.data)
+				req.Added = false
+				req.Updated = false
+			}
+
+		case MODE_UPDATE_ONLY:
+			// Only update if key already exists.
+			if exists {
+				req.Added = false
+				req.Updated = true
+				oldVal := node.getVal(idx)
+				req.Old = append([]byte(nil), oldVal...)
+				leafUpdate(
+					new,
+					node,
+					idx,
+					req.Key,
+					req.Val,
+				)
+				req.Added = false // not actually added, just updated
+			} else {
+				// Key not found, return old node unchanged.
+				copy(new.data, node.data)
+				req.Added = false
+				req.Updated = false
+			}
 		}
 
 	case BNODE_NODE:
@@ -217,8 +290,7 @@ func treeInsert(
 			new,
 			node,
 			idx,
-			key,
-			val,
+			*&req,
 		)
 
 	default:
@@ -228,99 +300,103 @@ func treeInsert(
 	return new
 }
 
-
-//part ofthe treeInsert():KVinsertiontoaninternalnode
+// part of the treeInsert():KV insertion to an internal node
 func nodeInsert(
-tree *BTree,new BNode,node BNode, idx uint16,
-key []byte, val[]byte,
-){
-//get and deallocate the kid node
-kptr :=node.getPtr(idx)
-knode:=tree.get(kptr)
-tree.del(kptr)
-//recursiveinsertiontothe kid node
-knode= treeInsert(tree, knode, key,val)
-//split the result
-nsplit, splited:= nodeSplit3(knode)
-//updatethe kid links
-nodeReplaceKidN(tree, new,node, idx,splited[:nsplit]...)
+	tree *BTree, new BNode, node BNode, idx uint16,
+	req *InsertReq,
+) {
+	//get and deallocate the kid node
+	kptr := node.getPtr(idx)
+	knode := tree.get(kptr)
+	tree.del(kptr)
+	//recursiveinsertiontothe kid node
+	knode = treeInsert(tree, knode, *&req)
+	//split the result
+	nsplit, splited := nodeSplit3(knode)
+	//updatethe kid links
+	nodeReplaceKidN(tree, new, node, idx, splited[:nsplit]...)
 }
-
 
 // Split a node into two nodes.
 // The right node always fits in one page.
 // The left node may still be oversized.
 func nodeSplit2(left BNode, right BNode, old BNode) {
-    assert(old.nkeys() >= 2)
+	Assert(old.nkeys() >= 2)
 
-    // find split point
-    nleft := old.nkeys() / 2
+	// find split point
+	nleft := old.nkeys() / 2
 
-    // move split point right until right fits
-    for old.nbytes()-old.kvPos(nleft) > BTREE_PAGE_SIZE {
-        nleft++
-    }
+	// move split point right until right fits
+	for old.nbytes()-old.kvPos(nleft) > BTREE_PAGE_SIZE {
+		nleft++
+	}
 
-    assert(nleft < old.nkeys())
+	Assert(nleft < old.nkeys())
 
-    // left node
-    left.setHeader(old.btype(), nleft)
+	// left node
+	left.setHeader(old.btype(), nleft)
 
-    nodeAppendRange(
-        left,
-        old,
-        0,      // dst
-        0,      // src
-        nleft,  // count
-    )
+	nodeAppendRange(
+		left,
+		old,
+		0,     // dst
+		0,     // src
+		nleft, // count
+	)
 
-    // right node
-    nright := old.nkeys() - nleft
+	// right node
+	nright := old.nkeys() - nleft
 
-    right.setHeader(old.btype(), nright)
+	right.setHeader(old.btype(), nright)
 
-    nodeAppendRange(
-        right,
-        old,
-        0,       // dst
-        nleft,   // src
-        nright,  // count
-    )
+	nodeAppendRange(
+		right,
+		old,
+		0,      // dst
+		nleft,  // src
+		nright, // count
+	)
 }
 
+// split a node if it's too big. the results are 1~3 nodes.
+func nodeSplit3(old BNode) (uint16, [3]BNode) {
+	if old.nbytes() <= BTREE_PAGE_SIZE {
+		old.data = old.data[:BTREE_PAGE_SIZE]
+		return 1, [3]BNode{old}
+	}
+	left := BNode{make([]byte, 2*BTREE_PAGE_SIZE)}
+	//might be split later
+	right := BNode{make([]byte, BTREE_PAGE_SIZE)}
 
-//split a node if it's too big. the results are 1~3 nodes.
-func nodeSplit3(old BNode)(uint16,[3]BNode){
-if old.nbytes()<= BTREE_PAGE_SIZE {
-old.data= old.data[:BTREE_PAGE_SIZE]
-return 1,[3]BNode{old}
-}
-left :=BNode{make([]byte,2*BTREE_PAGE_SIZE)} //might be split later
-right:= BNode{make([]byte,BTREE_PAGE_SIZE)}
-nodeSplit2(left,right,old)
-if left.nbytes()<=BTREE_PAGE_SIZE {
-left.data= left.data[:BTREE_PAGE_SIZE]
-return 2,[3]BNode{left, right}
-}
-//the left node isstill too large
-leftleft :=BNode{make([]byte,BTREE_PAGE_SIZE)}
-middle :=BNode{make([]byte, BTREE_PAGE_SIZE)}
-nodeSplit2(leftleft,middle, left)
-assert(leftleft.nbytes()<=BTREE_PAGE_SIZE)
-return 3,[3]BNode{leftleft,middle, right}
-}
+	nodeSplit2(left, right, old)
 
+	if left.nbytes() <= BTREE_PAGE_SIZE {
+		left.data = left.data[:BTREE_PAGE_SIZE]
+
+		return 2, [3]BNode{left, right}
+	}
+	//the left node is still too large
+	leftleft := BNode{make([]byte, BTREE_PAGE_SIZE)}
+
+	middle := BNode{make([]byte, BTREE_PAGE_SIZE)}
+
+	nodeSplit2(leftleft, middle, left)
+
+	Assert(leftleft.nbytes() <= BTREE_PAGE_SIZE)
+
+	return 3, [3]BNode{leftleft, middle, right}
+}
 
 // replace a link with multiple links
 func nodeReplaceKidN(
-tree *BTree, new BNode, old BNode, idx uint16,
-kids ...BNode,
+	tree *BTree, new BNode, old BNode, idx uint16,
+	kids ...BNode,
 ) {
-inc := uint16(len(kids))
-new.setHeader(BNODE_NODE, old.nkeys()+inc-1)
-nodeAppendRange(new, old, 0, 0, idx)
-for i, node := range kids {
-nodeAppendKV(new, idx+uint16(i), tree.new(node), node.getKey(0), nil)
-}
-nodeAppendRange(new, old, idx+inc, idx+1, old.nkeys()-(idx+1))
+	inc := uint16(len(kids))
+	new.setHeader(BNODE_NODE, old.nkeys()+inc-1)
+	nodeAppendRange(new, old, 0, 0, idx)
+	for i, node := range kids {
+		nodeAppendKV(new, idx+uint16(i), tree.new(node), node.getKey(0), nil)
+	}
+	nodeAppendRange(new, old, idx+inc, idx+1, old.nkeys()-(idx+1))
 }

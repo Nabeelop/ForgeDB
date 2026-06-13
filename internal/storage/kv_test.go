@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"os"
 	"testing"
+
+	"forgedb/internal/storage/btree"
 )
 
 func TestKVBasic(t *testing.T) {
@@ -21,7 +23,7 @@ func TestKVBasic(t *testing.T) {
 	// 1. Insert some items
 	k1 := []byte("key1")
 	v1 := []byte("value1")
-	if err := db.Set(k1, v1); err != nil {
+	if err := db.Set(&btree.InsertReq{Key: k1, Val: v1, Mode: btree.MODE_UPSERT}); err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
 
@@ -34,7 +36,7 @@ func TestKVBasic(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		k := []byte(string(rune(i)) + "_key")
 		v := []byte(string(rune(i)) + "_val")
-		if err := db.Set(k, v); err != nil {
+		if err := db.Set(&btree.InsertReq{Key: k, Val: v, Mode: btree.MODE_UPSERT}); err != nil {
 			t.Fatalf("Set key at %d failed: %v", i, err)
 		}
 	}
@@ -42,7 +44,7 @@ func TestKVBasic(t *testing.T) {
 	// 3. Delete keys to populate the FreeList
 	for i := 0; i < 50; i++ {
 		k := []byte(string(rune(i)) + "_key")
-		ok, err := db.Del(k)
+		ok, err := db.Del(&btree.DeleteReq{Key: k})
 		if err != nil {
 			t.Fatalf("Del key at %d failed: %v", i, err)
 		}
@@ -55,7 +57,7 @@ func TestKVBasic(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		k := []byte(string(rune(i+100)) + "_key_new")
 		v := []byte(string(rune(i+100)) + "_val_new")
-		if err := db.Set(k, v); err != nil {
+		if err := db.Set(&btree.InsertReq{Key: k, Val: v, Mode: btree.MODE_UPSERT}); err != nil {
 			t.Fatalf("Set new key at %d failed: %v", i, err)
 		}
 	}

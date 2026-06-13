@@ -19,7 +19,7 @@ type KV struct {
 
 	// internals
 	fp   *os.File
-	tree btree.BTree
+	Tree btree.BTree
 	free FreeList
 
 	mmap struct {
@@ -42,7 +42,7 @@ type KV struct {
 
 // Get returns the value for key, or nil if not found.
 func (db *KV) Get(key []byte) ([]byte, bool) {
-	val := db.tree.Get(key)
+	val := db.Tree.Get(key)
 
 	if val == nil {
 		return nil, false
@@ -51,15 +51,39 @@ func (db *KV) Get(key []byte) ([]byte, bool) {
 	return val, true
 }
 
+// Updates or inserts a key-value pair
+func (db *KV) Update(
+	req *btree.InsertReq,
+) (bool, error) {
+
+	db.Tree.InsertEx(req)
+
+	return req.Added, nil
+}
+
 // Put inserts or updates a key-value pair.
-func (db *KV) Set(key []byte, val []byte) error {
-	db.tree.Insert(key, val)
+func (db *KV) Set(
+	req *btree.InsertReq,
+) error {
+
+	_, err := db.Update(
+		req,
+	)
+
+	if err != nil {
+		return err
+	}
+
 	return flushPages(db)
 }
 
 // Delete removes a key. Returns false if the key was not found.
-func (db *KV) Del(key []byte) (bool, error) {
-	deleted := db.tree.Delete(key)
+func (db *KV) Del(
+	req *btree.DeleteReq,
+) (bool, error) {
+
+	deleted := db.Tree.DeleteEx(req)
+
 	return deleted, flushPages(db)
 }
 
@@ -158,7 +182,7 @@ func (db *KV) Open() error {
 	db.mmap.chunks = [][]byte{chunk}
 
 	// BTree callbacks.
-	db.tree.SetCallbacks(db.pageGet, db.pageNew, db.pageDel)
+	db.Tree.SetCallbacks(db.pageGet, db.pageNew, db.pageDel)
 
 	//Freelist Callbacks
 	db.free = FreeList{

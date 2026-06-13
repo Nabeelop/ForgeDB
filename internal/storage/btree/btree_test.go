@@ -25,12 +25,12 @@ func newC() *C {
 		tree: BTree{
 			get: func(ptr uint64) BNode {
 				node, ok := pages[ptr]
-				assert(ok)
+				Assert(ok)
 				return node
 			},
 
 			new: func(node BNode) uint64 {
-				assert(node.nbytes() <= BTREE_PAGE_SIZE)
+				Assert(node.nbytes() <= BTREE_PAGE_SIZE)
 
 				// Use the backing-array address as a unique page ID.
 				key := uint64(
@@ -39,7 +39,7 @@ func newC() *C {
 					),
 				)
 
-				assert(pages[key].data == nil)
+				Assert(pages[key].data == nil)
 
 				pages[key] = node
 
@@ -48,7 +48,7 @@ func newC() *C {
 
 			del: func(ptr uint64) {
 				_, ok := pages[ptr]
-				assert(ok)
+				Assert(ok)
 
 				delete(pages, ptr)
 			},
@@ -61,14 +61,19 @@ func newC() *C {
 
 // add inserts/updates a key in both the tree and the reference map.
 func (c *C) add(key string, val string) {
-	c.tree.Insert([]byte(key), []byte(val))
+	req := &InsertReq{
+		Key:  []byte(key),
+		Val:  []byte(val),
+		Mode: MODE_UPSERT,
+	}
+	c.tree.InsertEx(req)
 	c.ref[key] = val
 }
 
 // del deletes a key from both the tree and the reference map.
 func (c *C) del(key string) bool {
 	delete(c.ref, key)
-	return c.tree.Delete([]byte(key))
+	return c.tree.DeleteEx(&DeleteReq{Key: []byte(key)})
 }
 
 // verify checks that every key in the reference map is present in the tree

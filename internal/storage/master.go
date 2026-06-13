@@ -39,7 +39,7 @@ func masterLoad(db *KV) error {
 		return errors.New("bad master page")
 	}
 
-	db.tree.SetRoot(root)
+	db.Tree.SetRoot(root)
 	db.page.flushed = used
 	db.free.head = freeHead
 
@@ -50,7 +50,7 @@ func masterLoad(db *KV) error {
 func masterStore(db *KV) error {
 	var data [40]byte
 	copy(data[:16], []byte(DB_SIG))
-	binary.LittleEndian.PutUint64(data[16:], db.tree.GetRoot())
+	binary.LittleEndian.PutUint64(data[16:], db.Tree.GetRoot())
 	binary.LittleEndian.PutUint64(data[24:], db.page.flushed)
 	binary.LittleEndian.PutUint64(data[32:], db.free.head)
 

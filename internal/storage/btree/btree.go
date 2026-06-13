@@ -7,9 +7,9 @@ type BTree struct {
 	root uint64
 
 	// Callbacks for page management.
-	get func(uint64) BNode  // dereference a page pointer → BNode
-	new func(BNode) uint64  // allocate a new page, return its page ID
-	del func(uint64)        // deallocate a page
+	get func(uint64) BNode // dereference a page pointer → BNode
+	new func(BNode) uint64 // allocate a new page, return its page ID
+	del func(uint64)       // deallocate a page
 }
 
 // GetRoot returns the root page ID of the B-Tree.
@@ -61,17 +61,45 @@ func (tree *BTree) Get(key []byte) []byte {
 }
 
 // Insert inserts or updates a key-value pair in the tree.
-func (tree *BTree) Insert(key []byte, val []byte) {
-	assert(len(key) != 0)
-	assert(len(key) <= BTREE_MAX_KEY_SIZE)
-	assert(len(val) <= BTREE_MAX_VAL_SIZE)
+func (tree *BTree) InsertEx(req *InsertReq) {
+	Assert(len(req.Key) != 0)
+	Assert(len(req.Key) <= BTREE_MAX_KEY_SIZE)
+	Assert(len(req.Val) <= BTREE_MAX_VAL_SIZE)
 
-	// Bootstrap: create an empty leaf root with a sentinel key.
+	// Bootstrap an empty tree.
 	if tree.root == 0 {
-		root := BNode{data: make([]byte, BTREE_PAGE_SIZE)}
+
+		if req.Mode == MODE_UPDATE_ONLY {
+			req.Added = false
+			return
+		}
+
+		root := BNode{
+			data: make([]byte, BTREE_PAGE_SIZE),
+		}
+
 		root.setHeader(BNODE_LEAF, 2)
-		nodeAppendKV(root, 0, 0, nil, nil) // dummy sentinel
-		nodeAppendKV(root, 1, 0, key, val) // first real key
+
+		// Sentinel key.
+		nodeAppendKV(
+			root,
+			0,
+			0,
+			nil,
+			nil,
+		)
+
+		// First real key.
+		nodeAppendKV(
+			root,
+			1,
+			0,
+			req.Key,
+			req.Val,
+		)
+
+		req.Added = true
+
 		tree.root = tree.new(root)
 		return
 	}
@@ -79,33 +107,56 @@ func (tree *BTree) Insert(key []byte, val []byte) {
 	node := tree.get(tree.root)
 	tree.del(tree.root)
 
-	node = treeInsert(tree, node, key, val)
+	// Modified insertion path.
+	node = treeInsert(
+		tree,
+		node,
+		req,
+	)
 
 	nsplit, splitted := nodeSplit3(node)
 
 	if nsplit > 1 {
-		// Root was split — create a new internal root.
-		root := BNode{data: make([]byte, BTREE_PAGE_SIZE)}
-		root.setHeader(BNODE_NODE, nsplit)
-		for i, knode := range splitted[:nsplit] {
-			nodeAppendKV(root, uint16(i), tree.new(knode), knode.getKey(0), nil)
+
+		root := BNode{
+			data: make([]byte, BTREE_PAGE_SIZE),
 		}
+
+		root.setHeader(
+			BNODE_NODE,
+			nsplit,
+		)
+
+		for i, knode := range splitted[:nsplit] {
+			nodeAppendKV(
+				root,
+				uint16(i),
+				tree.new(knode),
+				knode.getKey(0),
+				nil,
+			)
+		}
+
 		tree.root = tree.new(root)
+
 	} else {
-		tree.root = tree.new(splitted[0])
+
+		tree.root = tree.new(
+			splitted[0],
+		)
 	}
 }
 
 // Delete removes a key from the tree. Returns false if the key was not found.
-func (tree *BTree) Delete(key []byte) bool {
-	assert(len(key) != 0)
-	assert(len(key) <= BTREE_MAX_KEY_SIZE)
+func (tree *BTree) DeleteEx(req *DeleteReq) bool {
+	Assert(len(req.Key) != 0)
+	Assert(len(req.Key) <= BTREE_MAX_KEY_SIZE)
 
 	if tree.root == 0 {
 		return false
 	}
 
-	updated := treeDelete(tree, tree.get(tree.root), key)
+	updated := treeDelete(tree, tree.get(tree.root), req.Key)
 
 	if len(updated.data) == 0 {
 		return false // key not found

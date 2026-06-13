@@ -16,13 +16,13 @@ const (
 
 // Layout constants.
 const (
-	HEADER           = 4
-	BTREE_PAGE_SIZE  = 4096
+	HEADER             = 4
+	BTREE_PAGE_SIZE    = 4096
 	BTREE_MAX_KEY_SIZE = 1000
 	BTREE_MAX_VAL_SIZE = 3000
 )
 
-func assert(cond bool) {
+func Assert(cond bool) {
 	if !cond {
 		panic("assertion failed")
 	}
@@ -41,7 +41,7 @@ func (node BNode) Data() []byte {
 
 func init() {
 	node1max := HEADER + 8 + 2 + 4 + BTREE_MAX_KEY_SIZE + BTREE_MAX_VAL_SIZE
-	assert(node1max <= BTREE_PAGE_SIZE)
+	Assert(node1max <= BTREE_PAGE_SIZE)
 }
 
 // ── Header ────────────────────────────────────────────────────────────────────
@@ -62,13 +62,13 @@ func (node BNode) setHeader(btype uint16, nkeys uint16) {
 // ── Pointers ──────────────────────────────────────────────────────────────────
 
 func (node BNode) getPtr(idx uint16) uint64 {
-	assert(idx < node.nkeys())
+	Assert(idx < node.nkeys())
 	pos := HEADER + 8*idx
 	return binary.LittleEndian.Uint64(node.data[pos:])
 }
 
 func (node BNode) setPtr(idx uint16, val uint64) {
-	assert(idx < node.nkeys())
+	Assert(idx < node.nkeys())
 	pos := HEADER + 8*idx
 	binary.LittleEndian.PutUint64(node.data[pos:], val)
 }
@@ -76,7 +76,7 @@ func (node BNode) setPtr(idx uint16, val uint64) {
 // ── Offset list ───────────────────────────────────────────────────────────────
 
 func offsetPos(node BNode, idx uint16) uint16 {
-	assert(1 <= idx && idx <= node.nkeys())
+	Assert(1 <= idx && idx <= node.nkeys())
 	return HEADER + 8*node.nkeys() + 2*(idx-1)
 }
 
@@ -95,19 +95,19 @@ func (node BNode) setOffset(idx uint16, offset uint16) {
 
 // kvPos returns the byte offset of the KV pair at idx within the data slice.
 func (node BNode) kvPos(idx uint16) uint16 {
-	assert(idx <= node.nkeys())
+	Assert(idx <= node.nkeys())
 	return HEADER + 8*node.nkeys() + 2*node.nkeys() + node.getOffset(idx)
 }
 
 func (node BNode) getKey(idx uint16) []byte {
-	assert(idx < node.nkeys())
+	Assert(idx < node.nkeys())
 	pos := node.kvPos(idx)
 	klen := binary.LittleEndian.Uint16(node.data[pos:])
 	return node.data[pos+4:][:klen]
 }
 
 func (node BNode) getVal(idx uint16) []byte {
-	assert(idx < node.nkeys())
+	Assert(idx < node.nkeys())
 	pos := node.kvPos(idx)
 	klen := binary.LittleEndian.Uint16(node.data[pos+0:])
 	vlen := binary.LittleEndian.Uint16(node.data[pos+2:])
